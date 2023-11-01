@@ -51,8 +51,10 @@ const (
 // env name for restore
 
 const (
-	DPRestoreTime      = "DP_RESTORE_TIME"
-	DPRestoreTimestamp = "DP_RESTORE_TIMESTAMP"
+	DPRestoreTime          = "DP_RESTORE_TIME"
+	DPRestoreTimestamp     = "DP_RESTORE_TIMESTAMP"
+	DPBackupStartTime      = "DP_BACKUP_START_TIME"
+	DPBackupStartTimestamp = "DP_BACKUP_START_TIMESTAMP"
 )
 
 // Restore constant

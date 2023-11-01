@@ -188,6 +188,7 @@ func (r *restoreJobBuilder) addCommonEnv() *restoreJobBuilder {
 		}
 	}
 	appendTimeEnv(dptypes.DPBackupStopTime, "", r.backupSet.Backup.GetEndTime())
+	appendTimeEnv(DPBackupStartTime, DPBackupStartTimestamp, r.backupSet.Backup.GetStartTime())
 	if r.restore.Spec.RestoreTime != "" {
 		restoreTime, _ := time.Parse(time.RFC3339, r.restore.Spec.RestoreTime)
 		appendTimeEnv(DPRestoreTime, DPRestoreTimestamp, &metav1.Time{Time: restoreTime})
