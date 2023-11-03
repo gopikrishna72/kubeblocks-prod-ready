@@ -242,7 +242,7 @@ func (r *BackupReconciler) prepareBackupRequest(
 		request.Labels = make(map[string]string)
 	}
 
-	backupPolicy, err := getBackupPolicyByName(reqCtx, r.Client, backup.Spec.BackupPolicyName)
+	backupPolicy, err := dputils.GetBackupPolicyByName(reqCtx, r.Client, backup.Spec.BackupPolicyName)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +258,7 @@ func (r *BackupReconciler) prepareBackupRequest(
 		return nil, fmt.Errorf("do not support more than one target pods")
 	}
 
-	backupMethod := getBackupMethodByName(backup.Spec.BackupMethod, backupPolicy)
+	backupMethod := dputils.GetBackupMethodByName(backup.Spec.BackupMethod, backupPolicy)
 	if backupMethod == nil {
 		return nil, intctrlutil.NewNotFound("backupMethod: %s not found",
 			backup.Spec.BackupMethod)
@@ -274,7 +274,7 @@ func (r *BackupReconciler) prepareBackupRequest(
 	}
 
 	if backupMethod.ActionSetName != "" {
-		actionSet, err := getActionSetByName(reqCtx, r.Client, backupMethod.ActionSetName)
+		actionSet, err := dputils.GetActionSetByName(reqCtx, r.Client, backupMethod.ActionSetName)
 		if err != nil {
 			return nil, err
 		}
@@ -375,7 +375,7 @@ func (r *BackupReconciler) patchBackupStatus(
 	request.Status.Phase = dpv1alpha1.BackupPhaseRunning
 	request.Status.StartTimestamp = &metav1.Time{Time: r.clock.Now().UTC()}
 
-	if err = setExpirationByCreationTime(request.Backup); err != nil {
+	if err = dpbackup.SetExpirationByCreationTime(request.Backup); err != nil {
 		return err
 	}
 	return r.Client.Status().Patch(request.Ctx, request.Backup, client.MergeFrom(original))
@@ -577,7 +577,7 @@ func (r *BackupReconciler) updateStatusIfFailed(
 
 	// set expiration time for failed backup, make sure the failed backup will be
 	// deleted after the expiration time.
-	_ = setExpirationByCreationTime(backup)
+	_ = dpbackup.SetExpirationByCreationTime(backup)
 
 	if errUpdate := r.Client.Status().Patch(reqCtx.Ctx, backup, client.MergeFrom(original)); errUpdate != nil {
 		return intctrlutil.CheckedRequeueWithError(errUpdate, reqCtx.Log, "")
@@ -696,36 +696,5 @@ func setClusterSnapshotAnnotation(backup *dpv1alpha1.Backup, cluster *appsv1alph
 		backup.Annotations = map[string]string{}
 	}
 	backup.Annotations[constant.ClusterSnapshotAnnotationKey] = *clusterString
-	return nil
-}
-
-func setExpirationByCreationTime(backup *dpv1alpha1.Backup) error {
-	// if expiration is already set, do not update it.
-	if backup.Status.Expiration != nil {
-		return nil
-	}
-
-	duration, err := backup.Spec.RetentionPeriod.ToDuration()
-	if err != nil {
-		return fmt.Errorf("failed to parse retention period %s, %v", backup.Spec.RetentionPeriod, err)
-	}
-
-	// if duration is zero, the backup will be kept forever.
-	// Do not set expiration time for it.
-	if duration.Seconds() == 0 {
-		return nil
-	}
-
-	var expiration *metav1.Time
-	if backup.Status.StartTimestamp != nil {
-		expiration = &metav1.Time{
-			Time: backup.Status.StartTimestamp.Add(duration),
-		}
-	} else {
-		expiration = &metav1.Time{
-			Time: backup.CreationTimestamp.Add(duration),
-		}
-	}
-	backup.Status.Expiration = expiration
 	return nil
 }

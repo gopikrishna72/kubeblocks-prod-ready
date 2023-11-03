@@ -44,44 +44,6 @@ var (
 	errNoDefaultBackupRepo = fmt.Errorf("no default BackupRepo found")
 )
 
-func getBackupPolicyByName(
-	reqCtx intctrlutil.RequestCtx,
-	cli client.Client,
-	name string) (*dpv1alpha1.BackupPolicy, error) {
-	backupPolicy := &dpv1alpha1.BackupPolicy{}
-	key := client.ObjectKey{
-		Namespace: reqCtx.Req.Namespace,
-		Name:      name,
-	}
-	if err := cli.Get(reqCtx.Ctx, key, backupPolicy); err != nil {
-		return nil, err
-	}
-	return backupPolicy, nil
-}
-
-// getActionSetByName gets the ActionSet by name.
-func getActionSetByName(reqCtx intctrlutil.RequestCtx,
-	cli client.Client, name string) (*dpv1alpha1.ActionSet, error) {
-	if name == "" {
-		return nil, nil
-	}
-	as := &dpv1alpha1.ActionSet{}
-	if err := cli.Get(reqCtx.Ctx, client.ObjectKey{Name: name}, as); err != nil {
-		reqCtx.Log.Error(err, "failed to get ActionSet for backup.", "ActionSet", name)
-		return nil, err
-	}
-	return as, nil
-}
-
-func getBackupMethodByName(name string, backupPolicy *dpv1alpha1.BackupPolicy) *dpv1alpha1.BackupMethod {
-	for _, m := range backupPolicy.Spec.BackupMethods {
-		if m.Name == name {
-			return &m
-		}
-	}
-	return nil
-}
-
 // getTargetPods gets the target pods by BackupPolicy. If podName is not empty,
 // it will return the pod which name is podName. Otherwise, it will return the
 // pods which are selected by BackupPolicy selector and strategy.

@@ -194,8 +194,11 @@ func (r *BackupScheduleReconciler) patchStatusFailed(reqCtx intctrlutil.RequestC
 func (r *BackupScheduleReconciler) handleSchedule(
 	reqCtx intctrlutil.RequestCtx,
 	backupSchedule *dpv1alpha1.BackupSchedule) error {
-	backupPolicy, err := getBackupPolicyByName(reqCtx, r.Client, backupSchedule.Spec.BackupPolicyName)
+	backupPolicy, err := dputils.GetBackupPolicyByName(reqCtx, r.Client, backupSchedule.Spec.BackupPolicyName)
 	if err != nil {
+		return err
+	}
+	if err = r.patchScheduleMetadata(reqCtx, backupSchedule); err != nil {
 		return err
 	}
 	scheduler := dpbackup.Scheduler{
@@ -206,4 +209,18 @@ func (r *BackupScheduleReconciler) handleSchedule(
 		Scheme:         r.Scheme,
 	}
 	return scheduler.Schedule()
+}
+
+func (r *BackupScheduleReconciler) patchScheduleMetadata(
+	reqCtx intctrlutil.RequestCtx,
+	backupSchedule *dpv1alpha1.BackupSchedule) error {
+	if backupSchedule.Labels[dptypes.BackupPolicyLabelKey] == backupSchedule.Spec.BackupPolicyName {
+		return nil
+	}
+	patch := client.MergeFrom(backupSchedule.DeepCopy())
+	if backupSchedule.Labels == nil {
+		backupSchedule.Labels = map[string]string{}
+	}
+	backupSchedule.Labels[dptypes.BackupPolicyLabelKey] = backupSchedule.Spec.BackupPolicyName
+	return r.Client.Patch(reqCtx.Ctx, backupSchedule, patch)
 }
