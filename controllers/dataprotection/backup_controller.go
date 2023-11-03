@@ -30,7 +30,6 @@ import (
 	vsv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -202,6 +201,10 @@ func (r *BackupReconciler) handleNewPhase(
 	backup *dpv1alpha1.Backup) (ctrl.Result, error) {
 	request, err := r.prepareBackupRequest(reqCtx, backup)
 	if err != nil {
+		if intctrlutil.IsTargetError(err, dperrors.ErrorTypeWaitForExternalHandler) {
+			r.Recorder.Event(backup, corev1.EventTypeWarning, string(dperrors.ErrorTypeWaitForExternalHandler), err.Error())
+			return intctrlutil.RequeueWithError(err, reqCtx.Log, "")
+		}
 		return r.updateStatusIfFailed(reqCtx, backup.DeepCopy(), backup, err)
 	}
 
@@ -215,9 +218,6 @@ func (r *BackupReconciler) handleNewPhase(
 
 	// set and patch backup status
 	if err = r.patchBackupStatus(backup, request); err != nil {
-		if intctrlutil.IsTargetError(err, dperrors.ErrorTypeWaitForExternalHandler) {
-			return intctrlutil.RequeueWithError(err, reqCtx.Log, "")
-		}
 		return r.updateStatusIfFailed(reqCtx, backup, request.Backup, err)
 	}
 	return intctrlutil.Reconciled()
@@ -247,17 +247,6 @@ func (r *BackupReconciler) prepareBackupRequest(
 		return nil, err
 	}
 
-	targetPods, err := getTargetPods(reqCtx, r.Client,
-		backup.Annotations[dptypes.BackupTargetPodLabelKey], backupPolicy)
-	if err != nil || len(targetPods) == 0 {
-		return nil, fmt.Errorf("failed to get target pods by backup policy %s/%s",
-			backupPolicy.Namespace, backupPolicy.Name)
-	}
-
-	if len(targetPods) > 1 {
-		return nil, fmt.Errorf("do not support more than one target pods")
-	}
-
 	backupMethod := dputils.GetBackupMethodByName(backup.Spec.BackupMethod, backupPolicy)
 	if backupMethod == nil {
 		return nil, intctrlutil.NewNotFound("backupMethod: %s not found",
@@ -277,6 +266,9 @@ func (r *BackupReconciler) prepareBackupRequest(
 		actionSet, err := dputils.GetActionSetByName(reqCtx, r.Client, backupMethod.ActionSetName)
 		if err != nil {
 			return nil, err
+		} else if actionSet.Spec.BackupType != dpv1alpha1.BackupTypeFull {
+			return nil, intctrlutil.NewErrorf(dperrors.ErrorTypeWaitForExternalHandler,
+				`wait for external handler to handle this backup type "%s"`, actionSet.Spec.BackupType)
 		}
 		request.ActionSet = actionSet
 	}
@@ -284,64 +276,24 @@ func (r *BackupReconciler) prepareBackupRequest(
 	request.BackupPolicy = backupPolicy
 	if !snapshotVolumes {
 		// if use volume snapshot, ignore backup repo
-		if err = r.handleBackupRepo(request); err != nil {
+		if err = HandleBackupRepo(request); err != nil {
 			return nil, err
 		}
 	}
-
 	request.BackupMethod = backupMethod
+
+	targetPods, err := GetTargetPods(reqCtx, r.Client,
+		backup.Annotations[dptypes.BackupTargetPodLabelKey], backupPolicy)
+	if err != nil || len(targetPods) == 0 {
+		return nil, fmt.Errorf("failed to get target pods by backup policy %s/%s",
+			backupPolicy.Namespace, backupPolicy.Name)
+	}
+
+	if len(targetPods) > 1 {
+		return nil, fmt.Errorf("do not support more than one target pods")
+	}
 	request.TargetPods = targetPods
 	return request, nil
-}
-
-// handleBackupRepo handles the backup repo, and get the backup repo PVC. If the
-// PVC is not present, it will add a special label and wait for the backup repo
-// controller to create the PVC.
-func (r *BackupReconciler) handleBackupRepo(request *dpbackup.Request) error {
-	repo, err := r.getBackupRepo(request.Ctx, request.Backup, request.BackupPolicy)
-	if err != nil {
-		return err
-	}
-	request.BackupRepo = repo
-
-	if repo.Status.Phase != dpv1alpha1.BackupRepoReady {
-		return dperrors.NewBackupRepoIsNotReady(repo.Name)
-	}
-
-	switch {
-	case repo.AccessByMount():
-		pvcName := repo.Status.BackupPVCName
-		if pvcName == "" {
-			return dperrors.NewBackupPVCNameIsEmpty(repo.Name, request.Spec.BackupPolicyName)
-		}
-		pvc := &corev1.PersistentVolumeClaim{}
-		pvcKey := client.ObjectKey{Namespace: request.Req.Namespace, Name: pvcName}
-		if err = r.Client.Get(request.Ctx, pvcKey, pvc); err != nil {
-			// will wait for the backuprepo controller to create the PVC,
-			// so ignore the NotFound error
-			return client.IgnoreNotFound(err)
-		}
-		// backupRepo PVC exists, record the PVC name
-		if err == nil {
-			request.BackupRepoPVC = pvc
-		}
-	case repo.AccessByTool():
-		toolConfigSecretName := repo.Status.ToolConfigSecretName
-		if toolConfigSecretName == "" {
-			return dperrors.NewToolConfigSecretNameIsEmpty(repo.Name)
-		}
-		secret := &corev1.Secret{}
-		secretKey := client.ObjectKey{Namespace: request.Req.Namespace, Name: toolConfigSecretName}
-		if err = r.Client.Get(request.Ctx, secretKey, secret); err != nil {
-			// will wait for the backuprepo controller to create the secret,
-			// so ignore the NotFound error
-			return client.IgnoreNotFound(err)
-		}
-		if err == nil {
-			request.ToolConfigSecret = secret
-		}
-	}
-	return nil
 }
 
 func (r *BackupReconciler) patchBackupStatus(
@@ -430,38 +382,12 @@ func (r *BackupReconciler) patchBackupObjectMeta(
 	return wait, r.Client.Patch(request.Ctx, request.Backup, client.MergeFrom(original))
 }
 
-// getBackupRepo returns the backup repo specified by the backup object or the policy.
-// if no backup repo specified, it will return the default one.
-func (r *BackupReconciler) getBackupRepo(ctx context.Context,
-	backup *dpv1alpha1.Backup,
-	backupPolicy *dpv1alpha1.BackupPolicy) (*dpv1alpha1.BackupRepo, error) {
-	// use the specified backup repo
-	var repoName string
-	if val := backup.Labels[dataProtectionBackupRepoKey]; val != "" {
-		repoName = val
-	} else if backupPolicy.Spec.BackupRepoName != nil && *backupPolicy.Spec.BackupRepoName != "" {
-		repoName = *backupPolicy.Spec.BackupRepoName
-	}
-	if repoName != "" {
-		repo := &dpv1alpha1.BackupRepo{}
-		if err := r.Client.Get(ctx, client.ObjectKey{Name: repoName}, repo); err != nil {
-			if apierrors.IsNotFound(err) {
-				return nil, intctrlutil.NewNotFound("backup repo %s not found", repoName)
-			}
-			return nil, err
-		}
-		return repo, nil
-	}
-	// fallback to use the default repo
-	return getDefaultBackupRepo(ctx, r.Client)
-}
-
 func (r *BackupReconciler) handleRunningPhase(
 	reqCtx intctrlutil.RequestCtx,
 	backup *dpv1alpha1.Backup) (ctrl.Result, error) {
 	request, err := r.prepareBackupRequest(reqCtx, backup)
 	if err != nil {
-		// skip processing for ErrorTypeWaitForExternalHandler when Backup is Running
+		// external controller is already processing it, only mark reconciled
 		if intctrlutil.IsTargetError(err, dperrors.ErrorTypeWaitForExternalHandler) {
 			return intctrlutil.Reconciled()
 		}
