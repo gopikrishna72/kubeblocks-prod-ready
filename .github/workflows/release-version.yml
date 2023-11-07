@@ -25,9 +25,6 @@ jobs:
       - name: release message
         id: get_trigger_mode
         run: |
-#          bash .github/utils/utils.sh --type 11 \
-#            --tag-name "${{ inputs.release_version }}" \
-#            --bot-webhook ${{ env.RELEASE_BOT_WEBHOOK }}
 
           TEST_PACKAGES=`bash .github/utils/utils.sh --type 16 \
               --trigger-type "[test]" \
