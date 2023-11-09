@@ -543,7 +543,8 @@ func (o *CreateRestoreOptions) runRestoreFromBackup() error {
 	if err := cluster.GetK8SClientObject(o.Dynamic, backup, types.BackupGVR(), o.Namespace, o.Backup); err != nil {
 		return err
 	}
-	if backup.Status.Phase != dpv1alpha1.BackupPhaseCompleted {
+	if backup.Status.Phase != dpv1alpha1.BackupPhaseCompleted &&
+		backup.Labels[dptypes.BackupTypeLabelKey] != string(dpv1alpha1.BackupTypeContinuous) {
 		return errors.Errorf(`backup "%s" is not completed.`, backup.Name)
 	}
 	if len(backup.Labels[constant.AppInstanceLabelKey]) == 0 {

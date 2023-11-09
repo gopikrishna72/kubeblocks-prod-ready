@@ -146,7 +146,7 @@ func (r *RestoreReconciler) newAction(reqCtx intctrlutil.RequestCtx, restore *dp
 			restore.Status.CompletionTimestamp = &metav1.Time{Time: time.Now()}
 			r.Recorder.Event(restore, corev1.EventTypeWarning, dprestore.ReasonRestoreFailed, err.Error())
 		case err != nil:
-			return intctrlutil.CheckedRequeueWithError(err, reqCtx.Log, "")
+			return RecorderEventAndRequeue(reqCtx, r.Recorder, restore, err)
 		default:
 			restore.Status.StartTimestamp = &metav1.Time{Time: time.Now()}
 			restore.Status.Phase = dpv1alpha1.RestorePhaseRunning
