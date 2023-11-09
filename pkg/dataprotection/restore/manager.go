@@ -42,7 +42,9 @@ import (
 )
 
 type BackupActionSet struct {
-	Backup            *dpv1alpha1.Backup
+	Backup *dpv1alpha1.Backup
+	// set it when the backup relies on a base backup, such as Continuous backup
+	BaseBackup        *dpv1alpha1.Backup
 	ActionSet         *dpv1alpha1.ActionSet
 	UseVolumeSnapshot bool
 }

@@ -239,10 +239,10 @@ func (r *BackupPolicyTplTransformer) buildBackupSchedule(
 	var schedules []dpv1alpha1.SchedulePolicy
 	for _, s := range r.backupPolicy.Schedules {
 		schedules = append(schedules, dpv1alpha1.SchedulePolicy{
-			BackupMethod:    s.BackupMethod,
-			CronExpression:  s.CronExpression,
-			Enabled:         s.Enabled,
-			RetentionPeriod: r.backupPolicy.RetentionPeriod,
+			BackupMethod:   s.BackupMethod,
+			CronExpression: s.CronExpression,
+			Enabled:        s.Enabled,
+			// RetentionPeriod: r.backupPolicy.RetentionPeriod,
 		})
 	}
 	backupSchedule.Spec.Schedules = schedules
@@ -260,10 +260,10 @@ func (r *BackupPolicyTplTransformer) syncBackupSchedule(backupSchedule *dpv1alph
 			continue
 		}
 		backupSchedule.Spec.Schedules = append(backupSchedule.Spec.Schedules, dpv1alpha1.SchedulePolicy{
-			BackupMethod:    s.BackupMethod,
-			CronExpression:  s.CronExpression,
-			Enabled:         s.Enabled,
-			RetentionPeriod: r.backupPolicy.RetentionPeriod,
+			BackupMethod:   s.BackupMethod,
+			CronExpression: s.CronExpression,
+			Enabled:        s.Enabled,
+			// RetentionPeriod: r.backupPolicy.RetentionPeriod,
 		})
 	}
 }
