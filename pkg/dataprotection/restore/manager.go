@@ -126,7 +126,7 @@ func (r *RestoreManager) BuildIncrementalBackupActionSets(reqCtx intctrlutil.Req
 			if backupJ == nil {
 				return true
 			}
-			return compareWithBackupStopTime(*backupI, *backupJ)
+			return CompareWithBackupStopTime(*backupI, *backupJ)
 		})
 		return backupSets
 	}

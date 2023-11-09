@@ -147,7 +147,7 @@ func getTimeFormat(envs []corev1.EnvVar) string {
 	return time.RFC3339
 }
 
-func compareWithBackupStopTime(backupI, backupJ dpv1alpha1.Backup) bool {
+func CompareWithBackupStopTime(backupI, backupJ dpv1alpha1.Backup) bool {
 	endTimeI := backupI.GetEndTime()
 	endTimeJ := backupJ.GetEndTime()
 	if endTimeI.IsZero() {
