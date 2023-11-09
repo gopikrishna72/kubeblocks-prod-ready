@@ -31,7 +31,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	dpv1alpha1 "github.com/apecloud/kubeblocks/apis/dataprotection/v1alpha1"
@@ -40,7 +39,6 @@ import (
 	dpbackup "github.com/apecloud/kubeblocks/pkg/dataprotection/backup"
 	dptypes "github.com/apecloud/kubeblocks/pkg/dataprotection/types"
 	dputils "github.com/apecloud/kubeblocks/pkg/dataprotection/utils"
-	viper "github.com/apecloud/kubeblocks/pkg/viperx"
 )
 
 // BackupScheduleReconciler reconciles a BackupSchedule object
@@ -95,9 +93,6 @@ func (r *BackupScheduleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&dpv1alpha1.BackupSchedule{}).
 		Owns(&batchv1.CronJob{}).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: viper.GetInt(maxConcurDataProtectionReconKey),
-		}).
 		Complete(r)
 }
 

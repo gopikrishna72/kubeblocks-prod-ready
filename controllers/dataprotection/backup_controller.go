@@ -210,7 +210,7 @@ func (r *BackupReconciler) handleNewPhase(
 
 	// set and patch backup object meta, including labels, annotations and finalizers
 	// if the backup object meta is changed, the backup object will be patched.
-	if wait, err := r.patchBackupObjectMeta(backup, request); err != nil {
+	if wait, err := PatchBackupObjectMeta(backup, request); err != nil {
 		return r.updateStatusIfFailed(reqCtx, backup, request.Backup, err)
 	} else if wait {
 		return intctrlutil.Reconciled()
@@ -333,55 +333,6 @@ func (r *BackupReconciler) patchBackupStatus(
 	return r.Client.Status().Patch(request.Ctx, request.Backup, client.MergeFrom(original))
 }
 
-// patchBackupObjectMeta patches backup object metaObject include cluster snapshot.
-func (r *BackupReconciler) patchBackupObjectMeta(
-	original *dpv1alpha1.Backup,
-	request *dpbackup.Request) (bool, error) {
-	targetPod := request.TargetPods[0]
-
-	// get KubeBlocks cluster and set labels and annotations for backup
-	// TODO(ldm): we should remove this dependency of cluster in the future
-	cluster := getCluster(request.Ctx, r.Client, targetPod)
-	if cluster != nil {
-		if err := setClusterSnapshotAnnotation(request.Backup, cluster); err != nil {
-			return false, err
-		}
-		if err := r.setConnectionPasswordAnnotation(request); err != nil {
-			return false, err
-		}
-		request.Labels[dptypes.ClusterUIDLabelKey] = string(cluster.UID)
-	}
-
-	for _, v := range getClusterLabelKeys() {
-		request.Labels[v] = targetPod.Labels[v]
-	}
-
-	request.Labels[constant.AppManagedByLabelKey] = constant.AppName
-	request.Labels[dptypes.BackupTypeLabelKey] = request.GetBackupType()
-	// wait for the backup repo controller to prepare the essential resource.
-	wait := false
-	if request.BackupRepo != nil {
-		request.Labels[dataProtectionBackupRepoKey] = request.BackupRepo.Name
-		if (request.BackupRepo.AccessByMount() && request.BackupRepoPVC == nil) ||
-			(request.BackupRepo.AccessByTool() && request.ToolConfigSecret == nil) {
-			request.Labels[dataProtectionWaitRepoPreparationKey] = trueVal
-			wait = true
-		}
-	}
-
-	// set annotations
-	request.Annotations[dptypes.BackupTargetPodLabelKey] = targetPod.Name
-
-	// set finalizer
-	controllerutil.AddFinalizer(request.Backup, dptypes.DataProtectionFinalizerName)
-
-	if reflect.DeepEqual(original.ObjectMeta, request.ObjectMeta) {
-		return wait, nil
-	}
-
-	return wait, r.Client.Patch(request.Ctx, request.Backup, client.MergeFrom(original))
-}
-
 func (r *BackupReconciler) handleRunningPhase(
 	reqCtx intctrlutil.RequestCtx,
 	backup *dpv1alpha1.Backup) (ctrl.Result, error) {
@@ -459,25 +410,6 @@ func (r *BackupReconciler) handleRunningPhase(
 		return intctrlutil.CheckedRequeueWithError(err, reqCtx.Log, "")
 	}
 	return intctrlutil.Reconciled()
-}
-
-func mergeActionStatus(original, new *dpv1alpha1.ActionStatus) dpv1alpha1.ActionStatus {
-	as := new.DeepCopy()
-	if original.StartTimestamp != nil {
-		as.StartTimestamp = original.StartTimestamp
-	}
-	return *as
-}
-
-func updateBackupStatusByActionStatus(backupStatus *dpv1alpha1.BackupStatus) {
-	for _, act := range backupStatus.Actions {
-		if act.TotalSize != "" && backupStatus.TotalSize == "" {
-			backupStatus.TotalSize = act.TotalSize
-		}
-		if act.TimeRange != nil && backupStatus.TimeRange == nil {
-			backupStatus.TimeRange = act.TimeRange
-		}
-	}
 }
 
 // handleCompletedPhase handles the backup object in completed phase.
@@ -558,15 +490,84 @@ func (r *BackupReconciler) deleteExternalResources(
 	return r.deleteExternalJobs(reqCtx, backup)
 }
 
+// PatchBackupObjectMeta patches backup object metaObject include cluster snapshot.
+func PatchBackupObjectMeta(
+	original *dpv1alpha1.Backup,
+	request *dpbackup.Request) (bool, error) {
+	targetPod := request.TargetPods[0]
+
+	// get KubeBlocks cluster and set labels and annotations for backup
+	// TODO(ldm): we should remove this dependency of cluster in the future
+	cluster := getCluster(request.Ctx, request.Client, targetPod)
+	if cluster != nil {
+		if err := setClusterSnapshotAnnotation(request.Backup, cluster); err != nil {
+			return false, err
+		}
+		if err := setConnectionPasswordAnnotation(request); err != nil {
+			return false, err
+		}
+		request.Labels[dptypes.ClusterUIDLabelKey] = string(cluster.UID)
+	}
+
+	for _, v := range getClusterLabelKeys() {
+		request.Labels[v] = targetPod.Labels[v]
+	}
+
+	request.Labels[constant.AppManagedByLabelKey] = constant.AppName
+	request.Labels[dptypes.BackupTypeLabelKey] = request.GetBackupType()
+	request.Labels[dptypes.BackupPolicyLabelKey] = request.Spec.BackupPolicyName
+	// wait for the backup repo controller to prepare the essential resource.
+	wait := false
+	if request.BackupRepo != nil {
+		request.Labels[dataProtectionBackupRepoKey] = request.BackupRepo.Name
+		if (request.BackupRepo.AccessByMount() && request.BackupRepoPVC == nil) ||
+			(request.BackupRepo.AccessByTool() && request.ToolConfigSecret == nil) {
+			request.Labels[dataProtectionWaitRepoPreparationKey] = trueVal
+			wait = true
+		}
+	}
+
+	// set annotations
+	request.Annotations[dptypes.BackupTargetPodLabelKey] = targetPod.Name
+
+	// set finalizer
+	controllerutil.AddFinalizer(request.Backup, dptypes.DataProtectionFinalizerName)
+
+	if reflect.DeepEqual(original.ObjectMeta, request.ObjectMeta) {
+		return wait, nil
+	}
+
+	return wait, request.Client.Patch(request.Ctx, request.Backup, client.MergeFrom(original))
+}
+
+func mergeActionStatus(original, new *dpv1alpha1.ActionStatus) dpv1alpha1.ActionStatus {
+	as := new.DeepCopy()
+	if original.StartTimestamp != nil {
+		as.StartTimestamp = original.StartTimestamp
+	}
+	return *as
+}
+
+func updateBackupStatusByActionStatus(backupStatus *dpv1alpha1.BackupStatus) {
+	for _, act := range backupStatus.Actions {
+		if act.TotalSize != "" && backupStatus.TotalSize == "" {
+			backupStatus.TotalSize = act.TotalSize
+		}
+		if act.TimeRange != nil && backupStatus.TimeRange == nil {
+			backupStatus.TimeRange = act.TimeRange
+		}
+	}
+}
+
 // setConnectionPasswordAnnotation sets the encrypted password of the connection credential to the backup's annotations
-func (r *BackupReconciler) setConnectionPasswordAnnotation(request *dpbackup.Request) error {
+func setConnectionPasswordAnnotation(request *dpbackup.Request) error {
 	encryptPassword := func() (string, error) {
 		target := request.BackupPolicy.Spec.Target
 		if target == nil || target.ConnectionCredential == nil {
 			return "", nil
 		}
 		secret := &corev1.Secret{}
-		if err := r.Client.Get(request.Ctx, client.ObjectKey{Name: target.ConnectionCredential.SecretName, Namespace: request.Namespace}, secret); err != nil {
+		if err := request.Client.Get(request.Ctx, client.ObjectKey{Name: target.ConnectionCredential.SecretName, Namespace: request.Namespace}, secret); err != nil {
 			return "", err
 		}
 		e := intctrlutil.NewEncryptor(viper.GetString(constant.CfgKeyDPEncryptionKey))

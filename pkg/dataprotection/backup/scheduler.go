@@ -87,8 +87,22 @@ func (s *Scheduler) validate() error {
 
 func (s *Scheduler) handleSchedulePolicy(index int) error {
 	schedulePolicy := &s.BackupSchedule.Spec.Schedules[index]
+
+	for _, method := range s.BackupPolicy.Spec.BackupMethods {
+		if method.Name == schedulePolicy.BackupMethod && !boolptr.IsSetToTrue(method.SnapshotVolumes) {
+			actionSet, err := dputils.GetActionSetByName(s.RequestCtx, s.Client, method.ActionSetName)
+			if err != nil {
+				return err
+			}
+			if actionSet.Spec.BackupType == dpv1alpha1.BackupTypeContinuous {
+				// ignore continuous backup
+				return nil
+			}
+		}
+	}
+
 	// TODO(ldm): better to remove this dependency in the future
-	if err := s.reconfigure(schedulePolicy); err != nil {
+	if err := s.Reconfigure(schedulePolicy); err != nil {
 		return err
 	}
 
@@ -105,7 +119,7 @@ type backupReconfigureRef struct {
 
 type parameterPairs map[string][]appsv1alpha1.ParameterPair
 
-func (s *Scheduler) reconfigure(schedulePolicy *dpv1alpha1.SchedulePolicy) error {
+func (s *Scheduler) Reconfigure(schedulePolicy *dpv1alpha1.SchedulePolicy) error {
 	reCfgRef := s.BackupSchedule.Annotations[dptypes.ReconfigureRefAnnotationKey]
 	if reCfgRef == "" {
 		return nil
